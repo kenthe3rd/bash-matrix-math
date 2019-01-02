@@ -1,0 +1,323 @@
+#!/bin/bash
+
+###
+### Global variables for tracking unique filename as well as
+### rows and cols for the matrices
+###
+
+rows=0
+cols=0
+datafilepath="datafile$$"
+
+###
+### removes temporary files created by the program
+###
+cleanUpTemp() {
+	if [ -f ./datafile$$ ]
+	then
+		rm datafile$$
+	fi
+}
+
+###
+### validates the number of arguments expected by the program
+###
+checkArgsNum() {
+	if [ $1 -ne $2 ]
+	then
+		echo "Error: Incorrect number of arguments" >&2
+		exit 1 
+	fi
+}
+
+###
+### validates that a file already exists and can be opened
+###
+checkFileArg() {
+	if [ ! -f ./$1 ]
+	then
+		echo "Error: File not found" >&2
+		exit 1
+	fi
+}
+
+###
+### verifies that an input is a valid matrix
+###
+checkDims() {
+	rows=0
+	cols=0
+	while read myLine
+	do
+		let "rows++"
+		if [ $rows -eq 1 ]
+		then
+			cols=$(wc -w <<< "$myLine")
+		fi
+		tempCols=$(wc -w <<< "$myLine")
+		if [ $cols -ne $tempCols ]
+		then
+			cleanUpTemp
+			echo "Error: Not a valid matrix" >&2
+			exit 1
+		fi
+	done < $1
+	if [ $rows -eq 0 ]
+	then
+		echo "Error: no matrix provided" >&2
+		exit 1
+	fi
+}
+
+
+case $1 in
+dims)
+	### check number of args, then check the input validity,
+	### then use checkDims to set the rows, cols variables
+	if [ $# -eq 1 ]
+	then
+		timeout 1s cat > "$datafilepath"
+	else
+		checkArgsNum $# 2
+		checkFileArg $2
+		datafilepath=$2
+	fi
+	checkDims $datafilepath
+	echo "$rows $cols"
+	;;
+transpose)
+	### verify that the matrix is valid, then read the matrix
+	### into arrays, then read the elements from the arrays 
+	### in transpose order
+	if [ $# -eq 1 ]
+	then
+		timeout 1s cat > "$datafilepath"
+	else
+		checkArgsNum $# 2
+		checkFileArg $2
+		datafilepath=$2
+	fi
+	checkDims $datafilepath
+	i=-1
+	### convert input into arrays
+	while read myLine
+	do
+		let "i++"
+		oldRows[$i]=$myLine
+	done < $datafilepath
+	i=0
+	### build the new rows in tanspose order
+	while [ $i -lt $rows ]
+	do
+		j=0
+		for word in ${oldRows[$i]}
+		do
+			printf -- "$word" >> "$j"newRowFile"$$"
+			printf -- "\t" >> "$j"newRowFile"$$"
+			let "j++"
+		done
+		let "i++"
+	done
+	i=0
+	### reading rows in order to a temporary file
+	while [ $i -lt $cols ]
+	do
+		cat "$i"newRowFile"$$" >> finalRowFile"$$"
+		truncate -s-1 finalRowFile"$$"
+		printf "\n" >> finalRowFile"$$"
+		let "i++"
+	done
+	cat finalRowFile"$$"
+	rm *RowFile*
+	;;
+
+mean)
+	### verify that the matrix is valid, read it into
+	### arrays, then create a new array that has as each
+	### element, the sum of that column, then apply the
+	### averaging formula to each element to produce
+	### the result
+	if [ $# -eq 1 ]
+	then
+		timeout 1s cat > "$datafilepath"
+	else
+		checkArgsNum $# 2
+		checkFileArg $2
+		datafilepath=$2
+	fi
+	checkDims $datafilepath
+	i=-1
+	# read into array for processing
+	while read myLine
+	do
+		let "i++"
+		oldRows[$i]=$myLine	
+	done < $datafilepath
+	i=0
+	# initialized array for holding sums to 0
+	for word in ${oldRows[0]}
+	do
+		sumRows[$i]=0
+		let "i++"
+	done
+	i=0
+	# sum the columns
+	for number in ${oldRows[@]}
+	do
+		j=0
+		for word in ${oldRows[$i]}
+		do
+			sumRows[$j]=$((${sumRows[$j]} + $word))
+			let "j++"
+		done
+		let "i++"
+	done
+	i=0
+	b=$rows
+	# divide each element in the sum array by the number
+	# of rows that went into it to produced the result
+	for word in ${sumRows[@]}
+	do
+		a=${sumRows[$i]}
+		sumRows[$i]=$(( ($a + ($b/2)*( ($a>0)*2-1)) / $b  ))
+		let "i++"
+	done
+	for word in ${sumRows[@]}
+	do
+		printf -- $word >> datafile$$
+		printf "\t" >> datafile$$
+	done
+	truncate -s-1 datafile$$
+	printf "\n" >> datafile$$
+	cat datafile$$
+	;;
+
+add)
+	### verify that the matrices are of matching dimensions,
+	### process them into arrays, and then do addition on
+	### them
+	checkArgsNum $# 3
+	checkFileArg $2
+	checkFileArg $3
+	checkDims $2
+	m1Rows=$rows
+	m1Cols=$cols
+	checkDims $3
+	if [ $rows -ne $m1Rows ] || [ $cols -ne $m1Cols ]
+	then
+		echo "Error: dims do not match" >&2
+		exit 1
+	fi
+	i=-1
+	while read myLine1 <&3 && read myLine2 <&4
+	do
+		# read the matrices into arrays
+		let "i++"
+		j=0
+		for word in $myLine1
+		do
+			line1[$j]=$word
+			let "j++"
+		done
+		j=0
+		for word in $myLine2
+		do
+			line2[$j]=$word
+			let "j++"
+		done
+		j=0
+		# process the arrays side-by-side, building
+		# the result array as we go
+		while [ $j -lt $cols ]
+		do
+			a=${line1[$j]}
+			b=${line2[$j]}
+			c=$(($a + $b))
+			printf -- $c >> datafile$$
+			printf "\t" >> datafile$$ 
+			let "j++"
+		done
+		truncate -s-1 datafile$$
+		printf "\n" >> datafile$$
+	done 3<$2 4<$3
+	cat datafile$$
+	;;
+
+multiply)
+	### verify that the matrices are of appropriate
+	### dimensions for multiplying, then read them
+	### into an associative array to make 
+	### multiplication easier; perform matrix maths
+	checkArgsNum $# 3
+	checkFileArg $2
+	checkFileArg $3
+	checkDims $2
+	m1Rows=$rows
+	m1Cols=$cols
+	checkDims $3
+	declare -A matrix1
+	declare -A matrix2
+	if [ $m1Cols -ne $rows ]
+	then
+		echo "Error: columns m1 does not match rows m2" >&2
+		exit 1
+	fi
+	i=0
+	while read myLine
+	do
+		j=0
+		for word in $myLine
+		do
+			matrix1[$i,$j]=$word
+			let "j++"
+		done
+		let "i++"
+	done < $2
+	i=0
+	while read myLine
+	do
+		j=0
+		# We use associative arrays here because 
+		# multi-dim arrays in bash are hard
+		for word in $myLine
+		do
+			matrix2[$i,$j]=$word
+			let "j++"
+		done
+		let "i++"
+	done < $3
+	rowCount=0
+	# In other words, for each row, multiply the appropriate
+	# row elements to the analogous column elements, while
+	# adding that to a running total for each set as defined
+	# by the rules of matrix multiplication
+	while [ $rowCount -lt $m1Rows ]
+	do
+		colCount=0
+		while [ $colCount -lt $cols ]
+		do
+			dot=0
+			sumVar=0
+			while [ $dot -lt $m1Cols ]
+			do
+				var1=${matrix1[$rowCount,$dot]}
+				var2=${matrix2[$dot,$colCount]}
+				let "sumVar=sumVar+var1*var2"
+				let "dot++"
+			done
+			printf -- $sumVar >> datafile$$
+			printf "\t" >> datafile$$
+			let "colCount++"
+		done
+		truncate -s-1 datafile$$
+		printf "\n" >> datafile$$
+		let "rowCount++"
+	done
+	cat datafile$$
+	;;
+*)
+	echo "Error: invalid command" >&2
+	exit 1
+esac
+cleanUpTemp
+exit

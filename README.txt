@@ -1,0 +1,1 @@
+matrix: a bash script for performing math on matrices
